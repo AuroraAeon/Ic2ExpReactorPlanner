@@ -5,7 +5,7 @@
  */
 package Ic2ExpReactorPlanner.components;
 
-import Ic2ExpReactorPlanner.MaterialsList;
+import Ic2ExpReactorPlanner.SimulationProfile;
 import java.awt.Image;
 
 /**
@@ -13,8 +13,6 @@ import java.awt.Image;
  * @author Brian McCloud
  */
 public class Reflector extends ReactorItem {
-    
-    private static String mcVersion = "1.12.2";
     
     public Reflector(final int id, final String baseName, final String name, final Image image, final double maxDamage, final double maxHeat, final String sourceMod) {
         super(id, baseName, name, image, maxDamage, maxHeat, sourceMod);
@@ -31,6 +29,9 @@ public class Reflector extends ReactorItem {
 
     @Override
     public double generateHeat() {
+        if (usesGtnhRules()) {
+            return 0;
+        }
         ReactorItem component = parent.getComponentAt(row - 1, col);
         if (component != null) {
             applyDamage(component.getRodCount());
@@ -52,13 +53,28 @@ public class Reflector extends ReactorItem {
     
     @Override
     public double getMaxDamage() {
-        if (maxDamage > 1 && "1.7.10".equals(mcVersion)) {
+        return getMaxDamage(usesGtnhRules() ? SimulationProfile.GTNH_2_9_0 : SimulationProfile.LEGACY);
+    }
+
+    @Override
+    public double getMaxDamage(SimulationProfile profile) {
+        if (maxDamage > 1 && (profile == SimulationProfile.GTNH_2_9_0
+                || (parent != null && parent.usesLegacyEarlyReflectors()))) {
             return maxDamage / 3;
         }
         return maxDamage;
     }
-    
-    public static void setMcVersion(String newVersion) {
-        mcVersion = newVersion;
+
+    @Override
+    boolean receiveNeutronPulse(FuelRod source, boolean heatPass) {
+        if (isBroken()) {
+            return false;
+        }
+        if (heatPass) {
+            applyDamage(1);
+        } else {
+            source.receiveNeutronPulse(source, false);
+        }
+        return true;
     }
 }

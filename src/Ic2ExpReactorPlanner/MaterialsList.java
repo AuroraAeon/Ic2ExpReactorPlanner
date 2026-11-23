@@ -219,7 +219,8 @@ public final class MaterialsList {
     }
     
     public static MaterialsList getMaterialsForComponent(ReactorItem component) {
-        return componentMaterialsMap.get(component.baseName);
+        MaterialsList ingredients = componentMaterialsMap.get(component.baseName);
+        return ingredients == null ? new MaterialsList(component.name) : ingredients;
     }
     
     private static Map<String, MaterialsList> buildComponentMaterialsMap() {

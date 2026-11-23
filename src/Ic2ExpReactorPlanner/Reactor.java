@@ -6,10 +6,9 @@
 package Ic2ExpReactorPlanner;
 
 import static Ic2ExpReactorPlanner.BundleHelper.formatI18n;
-import static Ic2ExpReactorPlanner.BundleHelper.getI18n;
+import Ic2ExpReactorPlanner.components.Plating;
 import Ic2ExpReactorPlanner.components.ReactorItem;
-import java.awt.HeadlessException;
-import javax.swing.JOptionPane;
+import java.util.Objects;
 
 /**
  * Represents an IndustrialCraft2 Nuclear Reactor.
@@ -17,17 +16,30 @@ import javax.swing.JOptionPane;
  */
 public class Reactor {
     
-    private final ReactorItem[][] grid = new ReactorItem[6][9];
+    public static final int ROWS = 6;
+    public static final int MAX_COLUMNS = 9;
+    private static final int MIN_COLUMNS = 3;
+    private static final int MAX_CHAMBERS = MAX_COLUMNS - MIN_COLUMNS;
+    private final ReactorItem[][] grid = new ReactorItem[ROWS][MAX_COLUMNS];
+    private int chambers = MAX_CHAMBERS;
+    private SimulationProfile simulationProfile = SimulationProfile.LEGACY;
+    private boolean legacyEarlyReflectors;
+    private boolean legacyGt509;
+    private String importWarnings = "";
     
     private double currentEUoutput = 0.0;
+    private float rawGtnhOutput;
     
     private double currentHeat = 0.0;
     
-    private double maxHeat = 10000.0;
+    private static final double BASE_HULL_CAPACITY = 10_000.0;
+    private double maxHeat = BASE_HULL_CAPACITY;
     
     private double ventedHeat = 0.0;
     
     private boolean fluid = false;
+    public static final int FLUID_TANK_CAPACITY_MB = 10_000;
+    private int fluidTransferLimit = FLUID_TANK_CAPACITY_MB;
     
     private boolean pulsed = false;
     
@@ -56,17 +68,111 @@ public class Reactor {
     // maximum paramatter types for a reactor component (current initial heat, automation threshold, reactor pause
     private static final int MAX_PARAM_TYPES = 3;
 
-    public static final int MAX_COMPONENT_HEAT = 1_080_000;
+    public static final int MAX_COMPONENT_HEAT = 1_000_000_000;
+    private static final int REVISION_3_MAX_COMPONENT_HEAT = 1_080_000;
+    private static final int VERSIONED_MAX_COMPONENT_ID = 127;
+
+    public SimulationProfile getSimulationProfile() {
+        return simulationProfile;
+    }
+
+    public void setSimulationProfile(SimulationProfile profile) {
+        simulationProfile = Objects.requireNonNull(profile);
+        resetHeatCapacity();
+        for (ReactorItem[] row : grid) {
+            for (ReactorItem item : row) {
+                if (item instanceof Plating plating) {
+                    adjustMaxHeat(plating.getHeatAdjustment());
+                }
+            }
+        }
+    }
+
+    public int getChambers() {
+        return chambers;
+    }
+
+    public int getColumns() {
+        return MIN_COLUMNS + chambers;
+    }
+
+    public void setLegacyRules(boolean earlyReflectors, boolean gt509) {
+        legacyEarlyReflectors = earlyReflectors;
+        legacyGt509 = gt509;
+    }
+
+    public boolean usesLegacyEarlyReflectors() {
+        return legacyEarlyReflectors;
+    }
+
+    public boolean usesLegacyGt509() {
+        return legacyGt509;
+    }
+
+    public void setChambers(int chambers) {
+        if (chambers < 0 || chambers > MAX_CHAMBERS) {
+            throw new IllegalArgumentException("Reactor chambers must be between 0 and 6");
+        }
+        for (ReactorItem[] row : grid) {
+            for (int col = MIN_COLUMNS + chambers; col < MAX_COLUMNS; col++) {
+                if (row[col] != null) {
+                    throw new IllegalArgumentException("Remove components outside the new reactor width first");
+                }
+            }
+        }
+        this.chambers = chambers;
+    }
+
+    /** Copies the parameters of the layout without carrying runtime component heat or damage. */
+    public Reactor copyDesign() {
+        Reactor result = new Reactor();
+        result.copyDesignFrom(this);
+        return result;
+    }
+
+    private void copyDesignFrom(Reactor source) {
+        clearGrid();
+        resetHeatCapacity();
+        chambers = source.chambers;
+        simulationProfile = source.simulationProfile;
+        setLegacyRules(source.legacyEarlyReflectors, source.legacyGt509);
+        importWarnings = source.importWarnings;
+        currentHeat = source.currentHeat;
+        fluid = source.fluid;
+        fluidTransferLimit = source.fluidTransferLimit;
+        pulsed = source.pulsed;
+        automated = source.automated;
+        usingReactorCoolantInjectors = source.usingReactorCoolantInjectors;
+        onPulse = source.onPulse;
+        offPulse = source.offPulse;
+        suspendTemp = source.suspendTemp;
+        resumeTemp = source.resumeTemp;
+        maxSimulationTicks = source.maxSimulationTicks;
+        clearEUOutput();
+        clearVentedHeat();
+        for (int row = 0; row < ROWS; row++) {
+            for (int col = 0; col < getColumns(); col++) {
+                ReactorItem item = source.grid[row][col];
+                if (item != null) {
+                    ReactorItem copy = ComponentFactory.createComponent(item.id);
+                    copy.setInitialHeat(item.getInitialHeat());
+                    copy.setAutomationThreshold(item.getAutomationThreshold());
+                    copy.setReactorPause(item.getReactorPause());
+                    setComponentAt(row, col, copy);
+                }
+            }
+        }
+    }
     
     public ReactorItem getComponentAt(final int row, final int column) {
-        if (row >= 0 && row < grid.length && column >= 0 && column < grid[row].length) {
+        if (row >= 0 && row < ROWS && column >= 0 && column < getColumns()) {
             return grid[row][column];
         }
         return null;
     }
     
     public void setComponentAt(final int row, final int column, final ReactorItem component) {
-        if (row >= 0 && row < grid.length && column >= 0 && column < grid[row].length) {
+        if (row >= 0 && row < ROWS && column >= 0 && column < getColumns()) {
             if (grid[row][column] != null) {
                 grid[row][column].removeFromReactor();
             }
@@ -89,7 +195,9 @@ public class Reactor {
      * @return the amount of EU output in the reactor tick just simulated.
      */
     public double getCurrentEUoutput() {
-        return currentEUoutput;
+        double gtnhEnergyPerStep = (double) (rawGtnhOutput * SimulationProfile.IC2_PULSE_ENERGY_FACTOR
+                * SimulationProfile.GTNH_NUCLEAR_CONFIG_FACTOR) * SimulationProfile.GAME_TICKS_PER_REACTOR_UPDATE;
+        return currentEUoutput + gtnhEnergyPerStep;
     }
 
     /**
@@ -112,6 +220,10 @@ public class Reactor {
      */
     public void adjustMaxHeat(final double adjustment) {
         maxHeat += adjustment;
+    }
+
+    void resetHeatCapacity() {
+        maxHeat = BASE_HULL_CAPACITY;
     }
 
     /**
@@ -140,12 +252,17 @@ public class Reactor {
     public void addEUOutput(final double amount) {
         currentEUoutput += amount;
     }
+
+    public void addGtnhPulseOutput(float output) {
+        rawGtnhOutput += output;
+    }
     
     /**
      * clears the EU output (presumably to start simulating a new reactor tick).
      */
     public void clearEUOutput() {
         currentEUoutput = 0.0;
+        rawGtnhOutput = 0;
     }
     
     /**
@@ -211,6 +328,53 @@ public class Reactor {
      * @param code the code of the reactor setup to use.
      */
     public void setCode(final String code) {
+        Reactor decoded = new Reactor();
+        decoded.simulationProfile = simulationProfile;
+        decoded.setLegacyRules(legacyEarlyReflectors, legacyGt509);
+        try {
+            decoded.decodeCode(Objects.requireNonNull(code).strip());
+            if (!decoded.encodedChambers) {
+                int requiredColumns = MIN_COLUMNS;
+                for (ReactorItem[] row : decoded.grid) {
+                    for (int col = requiredColumns; col < MAX_COLUMNS; col++) {
+                        if (row[col] != null) {
+                            requiredColumns = col + 1;
+                        }
+                    }
+                }
+                decoded.setChambers(Math.max(chambers, requiredColumns - MIN_COLUMNS));
+            }
+            decoded.validateDesign();
+        } catch (IndexOutOfBoundsException | NullPointerException ex) {
+            throw new IllegalArgumentException("Malformed reactor code", ex);
+        }
+        copyDesignFrom(decoded);
+    }
+
+    public String getImportWarnings() {
+        return importWarnings;
+    }
+
+    private boolean encodedChambers;
+
+    private void validateDesign() {
+        if (currentHeat < 0 || currentHeat > 120_000 || maxSimulationTicks < 0 || maxSimulationTicks > 5_000_000
+                || onPulse < 0 || offPulse < 0 || onPulse > 5_000_000 || offPulse > 5_000_000
+                || suspendTemp < 0 || resumeTemp < 0 || suspendTemp > 120_000 || resumeTemp > 120_000) {
+            throw new IllegalArgumentException("Reactor settings are out of range");
+        }
+        for (ReactorItem[] row : grid) {
+            for (ReactorItem item : row) {
+                if (item != null && (item.getInitialHeat() < 0 || item.getInitialHeat() > MAX_COMPONENT_HEAT
+                        || item.getAutomationThreshold() < 0 || item.getAutomationThreshold() > MAX_COMPONENT_HEAT
+                        || item.getReactorPause() < 0 || item.getReactorPause() > 10_000)) {
+                    throw new IllegalArgumentException("Component settings are out of range");
+                }
+            }
+        }
+    }
+
+    private void decodeCode(final String code) {
         int pos = 0;
         int[][] ids = new int[grid.length][grid[0].length];
         char[][][] paramTypes = new char[grid.length][grid[0].length][MAX_PARAM_TYPES];
@@ -249,7 +413,7 @@ public class Reactor {
                 }
                 for (int row = 0; row < grid.length; row++) {
                     for (int col = 0; col < grid[row].length; col++) {
-                        final ReactorItem component = ComponentFactory.createComponent(ids[row][col]);
+                        final ReactorItem component = createImportedComponent(ids[row][col]);
                         for (int paramNum = 0; paramNum < MAX_PARAM_TYPES; paramNum++) {
                             switch (paramTypes[row][col][paramNum]) {
                                 case 'h':
@@ -334,7 +498,7 @@ public class Reactor {
                     }
                 }
             } catch (NumberFormatException e) {
-                ExceptionDialogDisplay.showExceptionDialog(e);
+                throw new IllegalArgumentException("Malformed legacy reactor code", e);
             }
         } else {
             String tempCode = code;
@@ -347,13 +511,13 @@ public class Reactor {
             } else if (code.matches("[0-9A-Za-z+/=]+")) { //NOI18N
                 // Try to handle it as a newer code with the "erp=" prefix stripped
                 readCodeString(code);
-            } else if (!code.isEmpty()) {
-                JOptionPane.showMessageDialog(null, String.format(getI18n("Warning.InvalidReactorCode"), code), getI18n("Warning.Title"), JOptionPane.WARNING_MESSAGE);
+            } else {
+                throw new IllegalArgumentException("Invalid reactor code");
             }
         }
     }
 
-    private void handleTaloniusCode(String tempCode) throws HeadlessException {
+    private void handleTaloniusCode(String tempCode) {
         StringBuilder warnings = new StringBuilder(500);
         TaloniusDecoder decoder = new TaloniusDecoder(tempCode);
         // initial heat, in multiples of 100
@@ -491,7 +655,7 @@ public class Reactor {
         }
         if (warnings.length() > 0) {
             warnings.setLength(warnings.length() - 1);  // to remove last newline character
-            JOptionPane.showMessageDialog(null, warnings, getI18n("Warning.Title"), JOptionPane.WARNING_MESSAGE);
+            importWarnings = warnings.toString();
         }
     }
 
@@ -500,14 +664,25 @@ public class Reactor {
         BigintStorage storage = BigintStorage.inputBase64(code);
         // read the code revision from the code itself instead of making it part of the prefix.
         int codeRevision = storage.extract(255);
-        int maxComponentHeat;
-        if (codeRevision == 3)
-            maxComponentHeat = (int)1080e3;
-        else
-            maxComponentHeat = (int)360e3;
+        int maxComponentHeat = switch (codeRevision) {
+            case 4 -> MAX_COMPONENT_HEAT;
+            case 3 -> REVISION_3_MAX_COMPONENT_HEAT;
+            default -> 360_000;
+        };
         // Check if the code revision is supported yet.
-        if (codeRevision > 3) {
+        if (codeRevision > 4) {
             throw new IllegalArgumentException("Unsupported code revision in reactor code.");
+        }
+        int importedChambers = MAX_CHAMBERS;
+        if (codeRevision == 4) {
+            simulationProfile = storage.extract(1) == 0 ? SimulationProfile.LEGACY : SimulationProfile.GTNH_2_9_0;
+            importedChambers = storage.extract(MAX_CHAMBERS);
+            fluidTransferLimit = storage.extract(FLUID_TANK_CAPACITY_MB);
+            if (simulationProfile == SimulationProfile.LEGACY) {
+                legacyEarlyReflectors = storage.extract(1) != 0;
+                legacyGt509 = storage.extract(1) != 0;
+            }
+            encodedChambers = true;
         }
         // for code revision 1 or newer, read whether the reactor is pulsed and/or automated next.
         if (codeRevision >= 1) {
@@ -523,15 +698,17 @@ public class Reactor {
                     componentId = storage.extract(38);
                 } else if (codeRevision == 2) {
                     componentId = storage.extract(44);
-                } else {
+                } else if (codeRevision == 3) {
                     componentId = storage.extract(58);
+                } else {
+                    componentId = storage.extract(VERSIONED_MAX_COMPONENT_ID);
                 }
                 if (componentId != 0) {
-                    ReactorItem component = ComponentFactory.createComponent(componentId);
+                    ReactorItem component = createImportedComponent(componentId);
                     int hasSpecialAutomationConfig = storage.extract(1);
                     if (hasSpecialAutomationConfig > 0) {
                         component.setInitialHeat(storage.extract(maxComponentHeat));
-                        if (codeRevision == 0 || (codeRevision >= 1 && automated)) {
+                        if (codeRevision == 0 || codeRevision == 4 || automated) {
                             component.setAutomationThreshold(storage.extract(maxComponentHeat));
                             component.setReactorPause(storage.extract((int)10e3));
                         }
@@ -557,11 +734,27 @@ public class Reactor {
             automated = storage.extract(1) > 0;
         }
         maxSimulationTicks = storage.extract((int)5e6);
+        if (storage.hasRemaining()) {
+            throw new IllegalArgumentException("Unexpected data after reactor layout");
+        }
+        setChambers(importedChambers);
+    }
+
+    private static ReactorItem createImportedComponent(int id) {
+        ReactorItem component = ComponentFactory.createComponent(id);
+        if (id != 0 && component == null) {
+            throw new IllegalArgumentException("Unknown reactor component ID " + id);
+        }
+        return component;
     }
     
     // builds a Base64 code string, not including the prefix.
     private String buildCodeString() {
         BigintStorage storage = new BigintStorage();
+        boolean versioned = simulationProfile != SimulationProfile.LEGACY || chambers != MAX_CHAMBERS
+                || legacyEarlyReflectors || legacyGt509 || fluidTransferLimit != FLUID_TANK_CAPACITY_MB;
+        int heatRadix = versioned ? MAX_COMPONENT_HEAT : REVISION_3_MAX_COMPONENT_HEAT;
+        int componentIdLimit = versioned ? VERSIONED_MAX_COMPONENT_ID : 58;
         // first, store the extra details, in reverse order of expected reading.
         storage.store(maxSimulationTicks, (int)5e6);
         storage.store(usingReactorCoolantInjectors ? 1 : 0, 1);
@@ -581,25 +774,34 @@ public class Reactor {
                     int id = component.id;
                     // only store automation details for a component if non-default, and add a flag bit to indicate their presence.  null components don't even need the flag bit.
                     if (component.getInitialHeat() > 0 || component.getAutomationThreshold() != ComponentFactory.getDefaultComponent(id).getAutomationThreshold() || component.getReactorPause() != ComponentFactory.getDefaultComponent(id).getReactorPause()) {
-                        if (automated) {
+                        if (automated || versioned) {
                             storage.store(component.getReactorPause(), (int)10e3);
-                            storage.store(component.getAutomationThreshold(), (int)1080e3);
+                            storage.store(component.getAutomationThreshold(), heatRadix);
                         }
-                        storage.store((int)component.getInitialHeat(), (int)1080e3);
+                        storage.store((int)component.getInitialHeat(), heatRadix);
                         storage.store(1, 1);
                     } else {
                         storage.store(0, 1);
                     }
-                    storage.store(id, 58);
+                    storage.store(id, componentIdLimit);
                 } else {
-                    storage.store(0, 58);
+                    storage.store(0, componentIdLimit);
                 }
             }
         }
         storage.store(automated ? 1 : 0, 1);
         storage.store(pulsed ? 1 : 0, 1);
+        if (versioned) {
+            if (simulationProfile == SimulationProfile.LEGACY) {
+                storage.store(legacyGt509 ? 1 : 0, 1);
+                storage.store(legacyEarlyReflectors ? 1 : 0, 1);
+            }
+            storage.store(fluidTransferLimit, FLUID_TANK_CAPACITY_MB);
+            storage.store(chambers, MAX_CHAMBERS);
+            storage.store(simulationProfile == SimulationProfile.GTNH_2_9_0 ? 1 : 0, 1);
+        }
         // store the code revision, allowing values up to 255 (8 bits) before adjusting how it is stored in the code.
-        storage.store(3, 255);
+        storage.store(versioned ? 4 : 3, 255);
         return storage.outputBase64();
     }
 
@@ -679,6 +881,18 @@ public class Reactor {
      */
     public void setFluid(final boolean fluid) {
         this.fluid = fluid;
+    }
+
+    /** Combined cold-coolant supply and hot-coolant output room available each reactor update. */
+    public int getFluidTransferLimit() {
+        return fluidTransferLimit;
+    }
+
+    public void setFluidTransferLimit(int transferLimit) {
+        if (transferLimit < 0 || transferLimit > FLUID_TANK_CAPACITY_MB) {
+            throw new IllegalArgumentException("Coolant transfer per reactor update must be between 0 and 10000 mB");
+        }
+        fluidTransferLimit = transferLimit;
     }
     
     /**

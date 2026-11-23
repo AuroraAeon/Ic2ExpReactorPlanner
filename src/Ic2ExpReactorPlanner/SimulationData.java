@@ -56,6 +56,13 @@ public class SimulationData {
     
     // Completed-simulation details
     public int totalReactorTicks = 0;
+    public int cooldownReactorTicks;
+    public boolean exploded;
+    public double explosionPower;
+    public boolean fuelExhausted;
+    public long hotCoolantMillibuckets;
+    public GtnhThoriumCycle.Products thoriumProducts;
+    public VacuumCooling.Result vacuumCooling;
     public double totalEUoutput = 0;
     public double avgEUoutput = 0;
     public double minEUoutput = Double.MAX_VALUE;

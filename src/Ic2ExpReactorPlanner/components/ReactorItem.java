@@ -5,8 +5,8 @@
  */
 package Ic2ExpReactorPlanner.components;
 
-import Ic2ExpReactorPlanner.MaterialsList;
 import Ic2ExpReactorPlanner.Reactor;
+import Ic2ExpReactorPlanner.SimulationProfile;
 import java.awt.Image;
 import java.util.ResourceBundle;
 
@@ -22,6 +22,10 @@ public class ReactorItem {
     public final Image image;
     protected double maxDamage; public double getMaxDamage() { return maxDamage; }
     protected double maxHeat; public double getMaxHeat() { return maxHeat; }
+
+    public double getMaxDamage(SimulationProfile profile) {
+        return maxDamage;
+    }
     public final String sourceMod; // for potentially adjusting controls based on whether the mod is in use, will be null to indicate the item is part of base IC2.
     
     // Simulation setting values
@@ -99,6 +103,7 @@ public class ReactorItem {
     protected double bestCondensatorCooling = 0; public double getBestCondensatorCooling() { return bestCondensatorCooling; }
     
     protected double explosionPowerMultiplier = 1;
+    private boolean melted;
     
     protected static final ResourceBundle BUNDLE = ResourceBundle.getBundle("Ic2ExpReactorPlanner/Bundle");
     
@@ -168,6 +173,24 @@ public class ReactorItem {
      */
     public boolean isNeutronReflector() {
         return false;
+    }
+
+    /** Delivers a single pulse from an internal fuel cell. */
+    boolean receiveNeutronPulse(FuelRod source, boolean heatPass) {
+        return false;
+    }
+
+    protected final boolean usesGtnhRules() {
+        return parent != null && parent.getSimulationProfile() == SimulationProfile.GTNH_2_9_0;
+    }
+
+    /** Condensators report zero stored heat for exchange calculations in IC2. */
+    protected double heatForExchange() {
+        return getCurrentHeat();
+    }
+
+    protected double heatCapacityForExchange() {
+        return getMaxHeat();
     }
     
     /**
@@ -242,6 +265,7 @@ public class ReactorItem {
      * Resets heat to 0 (used when resetting simulation).
      */
     public final void clearCurrentHeat() {
+        reloadFreshHeat();
         currentHeat = initialHeat;
         bestVentCooling = 0.0;
         bestCondensatorCooling = 0.0;
@@ -251,6 +275,22 @@ public class ReactorItem {
         minHeatGenerated = Double.MAX_VALUE;
         maxHeatGenerated = 0.0;
         maxReachedHeat = initialHeat;
+    }
+
+    /** Install a cold replacement without losing the statistics accumulated for this slot. */
+    public void reloadFreshHeat() {
+        loadReplacementHeat(0);
+    }
+
+    /** Install a replacement with the configured entry heat, preserving slot statistics. */
+    public void reloadInitialHeat() {
+        loadReplacementHeat(initialHeat);
+    }
+
+    private void loadReplacementHeat(double heat) {
+        currentHeat = heat;
+        maxReachedHeat = Math.max(maxReachedHeat, heat);
+        melted = false;
     }
     
     /**
@@ -266,6 +306,7 @@ public class ReactorItem {
             if (tempHeat > getMaxHeat()) {
                 result = getMaxHeat() - tempHeat + 1;
                 tempHeat = getMaxHeat();
+                melted = true;
             } else if (tempHeat < 0.0) {
                 result = tempHeat;
                 tempHeat = 0.0;
@@ -303,6 +344,9 @@ public class ReactorItem {
      * @return true if the component has broken either from damage (e.g. neutron reflectors, fuel rods) or from heat (e.g. heat vents, coolant cells), false otherwise.
      */
     public boolean isBroken() {
+        if (usesGtnhRules()) {
+            return melted || currentDamage >= getMaxDamage();
+        }
         return currentHeat >= getMaxHeat() || currentDamage >= getMaxDamage();
     }
     

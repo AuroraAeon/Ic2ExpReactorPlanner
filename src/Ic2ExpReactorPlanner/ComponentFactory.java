@@ -6,6 +6,8 @@
 package Ic2ExpReactorPlanner;
 
 import static Ic2ExpReactorPlanner.BundleHelper.getI18n;
+import Ic2ExpReactorPlanner.SimulationProfile.GtnhFuel;
+import Ic2ExpReactorPlanner.components.BreederCell;
 import Ic2ExpReactorPlanner.components.Condensator;
 import Ic2ExpReactorPlanner.components.CoolantCell;
 import Ic2ExpReactorPlanner.components.Exchanger;
@@ -88,7 +90,31 @@ public class ComponentFactory {
         new CoolantCell(56, "coolantCellSpace360k", getI18n("ComponentName.CoolantCell360kSpace"), TextureFactory.getImage("gt.360k_Space_Coolantcell.png"), 1, 360e3, "GTNH"),//many rods? Or I'm wrong
         new CoolantCell(57, "coolantCellSpace540k", getI18n("ComponentName.CoolantCell540kSpace"), TextureFactory.getImage("gt.540k_Space_Coolantcell.png"), 1, 540e3, "GTNH"),
         new CoolantCell(58, "coolantCellSpace1080k", getI18n("ComponentName.CoolantCell1080kSpace"), TextureFactory.getImage("gt.1080k_Space_Coolantcell.png"), 1, 1080e3, "GTNH"),
+        new CoolantCell(59, "neutroniumHeatCapacitor", getI18n("ComponentName.NeutroniumHeatCapacitor"), TextureFactory.getImage("gt.1080k_Space_Coolantcell.png"), 1, 1_000_000_000, "GTNH"),
+        createGtnhFuel(60, "HighDensityUranium", 1, "reactorUraniumSimple.png"),
+        createGtnhFuel(61, "HighDensityUranium", 2, "reactorUraniumDual.png"),
+        createGtnhFuel(62, "HighDensityUranium", 4, "reactorUraniumQuad.png"),
+        createGtnhFuel(63, "HighDensityPlutonium", 1, "reactorMOXSimple.png"),
+        createGtnhFuel(64, "HighDensityPlutonium", 2, "reactorMOXDual.png"),
+        createGtnhFuel(65, "HighDensityPlutonium", 4, "reactorMOXQuad.png"),
+        createGtnhFuel(66, "ExcitedUranium", 1, "gt.Naquadahcell.png"),
+        createGtnhFuel(67, "ExcitedUranium", 2, "gt.Double_Naquadahcell.png"),
+        createGtnhFuel(68, "ExcitedUranium", 4, "gt.Quad_Naquadahcell.png"),
+        createGtnhFuel(69, "ExcitedPlutonium", 1, "gt.MNqCell.png"),
+        createGtnhFuel(70, "ExcitedPlutonium", 2, "gt.Double_MNqCell.png"),
+        createGtnhFuel(71, "ExcitedPlutonium", 4, "gt.Quad_MNqCell.png"),
+        new BreederCell(72, "breederRodLithium", getI18n("ComponentName.BreederRodLithium"), TextureFactory.getImage("gt.Thoriumcell.png")),
+        new BreederCell(73, "breederRodGlowstone", getI18n("ComponentName.BreederRodGlowstone"), TextureFactory.getImage("gt.Tiberiumcell.png")),
     };
+
+    private static FuelRod createGtnhFuel(int id, String family, int cells, String imageName) {
+        GtnhFuel fuel = GtnhFuel.forComponent(id);
+        String type = cells == 1 ? "FuelRod" : cells == 2 ? "DualFuelRod" : "QuadFuelRod";
+        String key = type + family;
+        String baseName = Character.toLowerCase(key.charAt(0)) + key.substring(1);
+        return new FuelRod(id, baseName, getI18n("ComponentName." + key), TextureFactory.getImage(imageName),
+                fuel.maxDamage, 1, "GTNH", 0, 0, cells, fuel.moxBonus > 0);
+    }
     
     private static final Map<String, ReactorItem> ITEM_MAP = makeItemMap();
     
@@ -107,6 +133,8 @@ public class ComponentFactory {
             Class<? extends ReactorItem> aClass = source.getClass();
             if (aClass == Condensator.class) {
                 return new Condensator((Condensator) source);
+            } else if (aClass == BreederCell.class) {
+                return new BreederCell((BreederCell) source);
             } else if (aClass == CoolantCell.class) {
                 return new CoolantCell((CoolantCell) source);
             } else if (aClass == Exchanger.class) {

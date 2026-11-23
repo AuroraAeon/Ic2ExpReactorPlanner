@@ -5,7 +5,6 @@
  */
 package Ic2ExpReactorPlanner.components;
 
-import Ic2ExpReactorPlanner.MaterialsList;
 import java.awt.Image;
 
 /**
@@ -13,6 +12,8 @@ import java.awt.Image;
  * @author Brian McCloud
  */
 public class CoolantCell extends ReactorItem {
+
+    private boolean heatedInElectricReactor;
     
     public CoolantCell(final int id, final String baseName, final String name, final Image image, final double maxDamage, final double maxHeat, final String sourceMod) {
         super(id, baseName, name, image, maxDamage, maxHeat, sourceMod);
@@ -26,7 +27,36 @@ public class CoolantCell extends ReactorItem {
     public double adjustCurrentHeat(final double heat) {
         currentCellCooling += heat;
         bestCellCooling = Math.max(currentCellCooling, bestCellCooling);
+        if (usesGtnhRules() && sourceMod != null && isHeatAcceptor()) {
+            if (currentHeat == 0) {
+                heatedInElectricReactor = false;
+            }
+            double refused = super.adjustCurrentHeat(heat);
+            if (currentHeat > 0 && !parent.isFluid() && !isBroken()) {
+                heatedInElectricReactor = true;
+            }
+            return refused;
+        }
         return super.adjustCurrentHeat(heat);
+    }
+
+    @Override
+    public boolean isHeatAcceptor() {
+        return super.isHeatAcceptor() && (!usesGtnhRules() || !parent.isFluid() || !heatedInElectricReactor);
+    }
+
+    @Override
+    public void reloadFreshHeat() {
+        super.reloadFreshHeat();
+        heatedInElectricReactor = false;
+    }
+
+    @Override
+    public double getExplosionPowerOffset() {
+        if (usesGtnhRules() && sourceMod != null && !isBroken()) {
+            return 1f + (float) getMaxHeat() / 30_000f;
+        }
+        return 0;
     }
     
 }

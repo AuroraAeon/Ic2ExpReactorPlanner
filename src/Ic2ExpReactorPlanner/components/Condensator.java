@@ -5,7 +5,6 @@
  */
 package Ic2ExpReactorPlanner.components;
 
-import Ic2ExpReactorPlanner.MaterialsList;
 import java.awt.Image;
 
 /**
@@ -21,19 +20,34 @@ public class Condensator extends ReactorItem {
     public Condensator(final Condensator other) {
         super(other);
     }
+
+    @Override
+    public boolean isHeatAcceptor() {
+        return super.isHeatAcceptor() && (!usesGtnhRules() || currentHeat < getMaxHeat());
+    }
     
     @Override
     public double adjustCurrentHeat(final double heat) {
         if (heat < 0.0) {
             return heat;
         }
-        currentCondensatorCooling += heat;
+        double acceptedHeat = Math.min(heat, getMaxHeat() - (usesGtnhRules() ? currentHeat : heat));
+        currentCondensatorCooling += usesGtnhRules() ? acceptedHeat : heat;
         bestCondensatorCooling = Math.max(currentCondensatorCooling, bestCondensatorCooling);
-        double acceptedHeat = Math.min(heat, getMaxHeat() - heat);
         double result = heat - acceptedHeat;
         currentHeat += acceptedHeat;
         maxReachedHeat = Math.max(maxReachedHeat, currentHeat);
         return result;
+    }
+
+    @Override
+    protected double heatForExchange() {
+        return usesGtnhRules() ? 0 : currentHeat;
+    }
+
+    @Override
+    protected double heatCapacityForExchange() {
+        return getMaxHeat() + (usesGtnhRules() ? 1 : 0);
     }
 
     @Override

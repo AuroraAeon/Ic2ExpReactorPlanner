@@ -5,10 +5,7 @@
  */
 package Ic2ExpReactorPlanner.components;
 
-import Ic2ExpReactorPlanner.MaterialsList;
 import java.awt.Image;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * Represents a heat exchanger of some sort in a reactor.
@@ -33,58 +30,14 @@ public class Exchanger extends ReactorItem {
     
     @Override
     public void transfer() {
-        List<ReactorItem> heatableNeighbors = new ArrayList<>(4);
-        ReactorItem component = parent.getComponentAt(row, col - 1);
-        if (component != null && component.isHeatAcceptor()) {
-            heatableNeighbors.add(component);
-        }
-        component = parent.getComponentAt(row, col + 1);
-        if (component != null && component.isHeatAcceptor()) {
-            heatableNeighbors.add(component);
-        }
-        component = parent.getComponentAt(row - 1, col);
-        if (component != null && component.isHeatAcceptor()) {
-            heatableNeighbors.add(component);
-        }
-        component = parent.getComponentAt(row + 1, col);
-        if (component != null && component.isHeatAcceptor()) {
-            heatableNeighbors.add(component);
-        }
         // Code adapted from decompiled IC2 code, class ItemReactorHeatSwitch, with permission from Thunderdark.
         double myHeat = 0;
         if (switchSide > 0) {
-            for (ReactorItem heatableNeighbor : heatableNeighbors) {
-                double mymed = getCurrentHeat() * 100.0 / getMaxHeat();
-                double heatablemed = heatableNeighbor.getCurrentHeat() * 100.0 / heatableNeighbor.getMaxHeat();
-
-                double add = (int) (heatableNeighbor.getMaxHeat() / 100.0 * (heatablemed + mymed / 2.0));
-                if (add > switchSide) {
-                    add = switchSide;
-                }
-                if (heatablemed + mymed / 2.0 < 1.0) {
-                    add = switchSide / 2;
-                }
-                if (heatablemed + mymed / 2.0 < 0.75) {
-                    add = switchSide / 4;
-                }
-                if (heatablemed + mymed / 2.0 < 0.5) {
-                    add = switchSide / 8;
-                }
-                if (heatablemed + mymed / 2.0 < 0.25) {
-                    add = 1;
-                }
-                if (Math.round(heatablemed * 10.0) / 10.0 > Math.round(mymed * 10.0) / 10.0) {
-                    add -= 2 * add;
-                } else if (Math.round(heatablemed * 10.0) / 10.0 == Math.round(mymed * 10.0) / 10.0) {
-                    add = 0;
-                }
-                myHeat -= add;
-                if (add > 0) {
-                    currentComponentHeating += add;
-                }
-                add = heatableNeighbor.adjustCurrentHeat(add);
-                myHeat += add;
-            }
+            double myPercent = getCurrentHeat() * 100.0 / getMaxHeat();
+            myHeat = exchangeWith(row, col - 1, myPercent, myHeat);
+            myHeat = exchangeWith(row, col + 1, myPercent, myHeat);
+            myHeat = exchangeWith(row - 1, col, myPercent, myHeat);
+            myHeat = exchangeWith(row + 1, col, myPercent, myHeat);
         }
         if (switchReactor > 0) {
             double mymed = getCurrentHeat() * 100.0 / getMaxHeat();
@@ -120,6 +73,32 @@ public class Exchanger extends ReactorItem {
             }
         }
         adjustCurrentHeat(myHeat);
+    }
+
+    private double exchangeWith(int targetRow, int targetCol, double myPercent, double pendingHeat) {
+        ReactorItem target = parent.getComponentAt(targetRow, targetCol);
+        if (target == null || !target.isHeatAcceptor()) {
+            return pendingHeat;
+        }
+        double targetCapacity = target.heatCapacityForExchange();
+        double targetPercent = target.heatForExchange() * 100.0 / targetCapacity;
+        double average = targetPercent + myPercent / 2.0;
+
+        int amount = Math.min(switchSide, (int) (targetCapacity / 100.0 * average));
+        if (average < 0.25) {
+            amount = 1;
+        } else if (average < 0.5) {
+            amount = switchSide / 8;
+        } else if (average < 0.75) {
+            amount = switchSide / 4;
+        } else if (average < 1.0) {
+            amount = switchSide / 2;
+        }
+        amount *= Long.compare(Math.round(myPercent * 10.0), Math.round(targetPercent * 10.0));
+        if (amount > 0) {
+            currentComponentHeating += amount;
+        }
+        return pendingHeat - amount + target.adjustCurrentHeat(amount);
     }
     
     @Override

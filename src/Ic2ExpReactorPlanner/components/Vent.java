@@ -5,10 +5,7 @@
  */
 package Ic2ExpReactorPlanner.components;
 
-import Ic2ExpReactorPlanner.MaterialsList;
 import java.awt.Image;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * Represents some kind of vent in a reactor.
@@ -38,40 +35,40 @@ public class Vent extends ReactorItem {
     @Override
     public double dissipate() {
         double deltaHeat = Math.min(hullDraw, parent.getCurrentHeat());
+        double heatBeforeDraw = getCurrentHeat();
         currentHullCooling = deltaHeat;
         parent.adjustCurrentHeat(-deltaHeat);
         this.adjustCurrentHeat(deltaHeat);
-        final double currentDissipation = Math.min(selfVent, getCurrentHeat());
+        // A melted IC2 vent still processes self-cooling on the original stack this pass.
+        final double currentDissipation = Math.min(selfVent,
+                usesGtnhRules() && isBroken() ? heatBeforeDraw : getCurrentHeat());
         currentVentCooling = currentDissipation;
         parent.ventHeat(currentDissipation);
         adjustCurrentHeat(-currentDissipation);
         if (sideVent > 0) {
-            List<ReactorItem> coolableNeighbors = new ArrayList<>(4);
-            ReactorItem component = parent.getComponentAt(row - 1, col);
-            if (component != null && component.isCoolable()) {
-                coolableNeighbors.add(component);
-            }
-            component = parent.getComponentAt(row, col + 1);
-            if (component != null && component.isCoolable()) {
-                coolableNeighbors.add(component);
-            }
-            component = parent.getComponentAt(row + 1, col);
-            if (component != null && component.isCoolable()) {
-                coolableNeighbors.add(component);
-            }
-            component = parent.getComponentAt(row, col - 1);
-            if (component != null && component.isCoolable()) {
-                coolableNeighbors.add(component);
-            }
-            for (ReactorItem coolableNeighbor : coolableNeighbors) {
-                double rejectedCooling = coolableNeighbor.adjustCurrentHeat(-sideVent);
-                double tempDissipatedHeat = sideVent + rejectedCooling;
-                parent.ventHeat(tempDissipatedHeat);
-                currentVentCooling += tempDissipatedHeat;
+            if (usesGtnhRules()) {
+                coolNeighbor(row, col - 1);
+                coolNeighbor(row, col + 1);
+                coolNeighbor(row - 1, col);
+                coolNeighbor(row + 1, col);
+            } else {
+                coolNeighbor(row - 1, col);
+                coolNeighbor(row, col + 1);
+                coolNeighbor(row + 1, col);
+                coolNeighbor(row, col - 1);
             }
         }
         bestVentCooling = Math.max(bestVentCooling, currentVentCooling);
         return currentDissipation;
+    }
+
+    private void coolNeighbor(int targetRow, int targetCol) {
+        ReactorItem target = parent.getComponentAt(targetRow, targetCol);
+        if (target != null && (usesGtnhRules() ? target.isHeatAcceptor() : target.isCoolable())) {
+            double cooled = sideVent + target.adjustCurrentHeat(-sideVent);
+            parent.ventHeat(cooled);
+            currentVentCooling += cooled;
+        }
     }
     
     @Override

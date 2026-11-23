@@ -5,8 +5,8 @@
  */
 package Ic2ExpReactorPlanner.components;
 
-import Ic2ExpReactorPlanner.MaterialsList;
 import Ic2ExpReactorPlanner.Reactor;
+import Ic2ExpReactorPlanner.SimulationProfile;
 import java.awt.Image;
 
 /**
@@ -30,19 +30,31 @@ public class Plating extends ReactorItem {
         this.heatAdjustment = other.heatAdjustment;
         this.explosionPowerMultiplier = other.explosionPowerMultiplier;
     }
+
+    public int getHeatAdjustment() {
+        return getHeatAdjustment(parent == null ? SimulationProfile.LEGACY : parent.getSimulationProfile());
+    }
+
+    public int getHeatAdjustment(SimulationProfile profile) {
+        return profile == SimulationProfile.GTNH_2_9_0 && id == 22 ? 2000 : heatAdjustment;
+    }
+
+    public float getHeatEffectModifier() {
+        return (float) Math.sqrt(explosionPowerMultiplier);
+    }
     
     @Override
     public void addToReactor(final Reactor parent, final int row, final int col) {
         super.addToReactor(parent, row, col);
         if (parent != null) {
-            parent.adjustMaxHeat(heatAdjustment);
+            parent.adjustMaxHeat(getHeatAdjustment());
         }
     }
 
     @Override
     public void removeFromReactor() {
         if (parent != null) {
-            parent.adjustMaxHeat(-heatAdjustment);
+            parent.adjustMaxHeat(-getHeatAdjustment());
         }
         super.removeFromReactor();
     }

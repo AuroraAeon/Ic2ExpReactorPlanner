@@ -36,6 +36,10 @@ public class BigintStorage {
         storedValue = values[0];
         return values[1].intValue();
     }
+
+    boolean hasRemaining() {
+        return storedValue.signum() != 0;
+    }
     
     /**
      * Takes input of a Base64 string, and converts it to a BigintStorage.
@@ -46,6 +50,9 @@ public class BigintStorage {
         BigintStorage result = new BigintStorage();
         byte[] temp = Base64.getDecoder().decode(code);
         result.storedValue = new BigInteger(temp);
+        if (result.storedValue.signum() < 0) {
+            throw new IllegalArgumentException("Negative reactor layout");
+        }
         return result;
     }
     
