@@ -1,85 +1,82 @@
-apply plugin: 'java'
-apply plugin: 'application'
-
-sourceCompatibility = '1.7'
-[compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
-
-// NetBeans will automatically add "run" and "debug" tasks relying on the
-// "mainClass" property. You may however define the property prior executing
-// tasks by passing a "-PmainClass=<QUALIFIED_CLASS_NAME>" argument.
-//
-// Note however, that you may define your own "run" and "debug" task if you
-// prefer. In this case NetBeans will not add these tasks but you may rely on
-// your own implementation.
-if (!hasProperty('mainClass')) {
-    ext.mainClass = 'Ic2ExpReactorPlanner.ReactorPlannerFrame'
+plugins {
+    id 'application'
 }
 
-mainClassName = ext.mainClass
+version = providers.gradleProperty('erpVersion').get()
+
+application {
+    mainClass = 'Ic2ExpReactorPlanner.ReactorPlannerFrame'
+}
 
 sourceSets {
-  main {
-    java {
-      srcDirs 'src'
+    main {
+        java.setSrcDirs(['src'])
+        resources {
+            setSrcDirs(['src'])
+            include 'assets/**', 'Ic2ExpReactorPlanner/*.properties'
+        }
     }
-    resources {
-      srcDir 'resources'
+    test {
+        java.setSrcDirs(['test'])
+        resources.setSrcDirs(['testResources'])
     }
-  }
-
-  test {
-    java {
-      srcDir 'test'
+    benchmark {
+        java.setSrcDirs(['benchmark'])
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
     }
-    resources {
-      srcDir 'testResources'
-    }
-  }
 }
 
 repositories {
     mavenCentral()
-    // You may define additional repositories, or even remove "mavenCentral()".
-    // Read more about repositories here:
-    //   http://www.gradle.org/docs/current/userguide/dependency_management.html#sec:repositories
 }
 
 dependencies {
-    // TODO: Add dependencies here ...
-    // You can read more about how to add dependency here:
-    //   http://www.gradle.org/docs/current/userguide/dependency_management.html#sec:how_to_declare_your_dependencies
-    testCompile group: 'junit', name: 'junit', version: '4.10'
+    testImplementation 'junit:junit:4.13.2'
 }
 
-jar {
-    from('src') {
-        include 'assets/**/*.png'
-        include 'Ic2ExpReactorPlanner/Bundle*.properties'
-    }
-    manifest {
-        attributes 'Main-Class': 'Ic2ExpReactorPlanner.ReactorPlannerFrame'
-    }
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 17
 }
 
-task processAssets(type: Copy) {
-    from('src') {
-        include 'assets/**/*.png'
-        include 'Ic2ExpReactorPlanner/Bundle*.properties'
-    }
-    into 'build/classes/java/main'
+tasks.named('test', Test) {
+    systemProperty 'java.awt.headless', 'true'
+    systemProperty 'user.language', 'en'
+    systemProperty 'user.country', 'US'
 }
 
-run {
-    run.dependsOn processAssets
+tasks.register('testChinese', Test) {
+    description = 'Runs the same suite in the Simplified Chinese locale.'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    systemProperty 'java.awt.headless', 'true'
+    systemProperty 'user.language', 'zh'
+    systemProperty 'user.country', 'CN'
+    shouldRunAfter tasks.named('test')
 }
 
-task processSource(type: Copy) {
-    from sourceSets.main.java
-    inputs.property 'erpVersion', erpVersion
-    filter { line -> line.replaceAll('@VERSION@', erpVersion) }
-    into "$buildDir/src"
+tasks.named('check') {
+    dependsOn tasks.named('testChinese')
 }
 
-compileJava {
-    source = processSource.outputs
+tasks.named('jar', Jar) {
+    manifest.attributes 'Main-Class': application.mainClass.get(), 'Implementation-Version': project.version
+}
+
+tasks.register('benchmark', JavaExec) {
+    group = 'verification'
+    description = 'Measures simulation throughput and bytes allocated per run.'
+    classpath = sourceSets.benchmark.runtimeClasspath
+    mainClass = 'Ic2ExpReactorPlanner.SimulatorBenchmark'
+    jvmArgs '-Xms256m', '-Xmx768m'
+}
+
+tasks.register('benchmarkIndependentLayouts', JavaExec) {
+    group = 'verification'
+    description = 'Compares one, two, and four concurrent GTNH layout simulations.'
+    classpath = sourceSets.benchmark.runtimeClasspath
+    mainClass = 'Ic2ExpReactorPlanner.IndependentLayoutsBenchmark'
+    jvmArgs '-Xms256m', '-Xmx768m'
 }
